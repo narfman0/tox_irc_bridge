@@ -11,20 +11,16 @@ from threading import Thread
 
 from pytox import Tox
 
-from tox_irc_bridge.av import AV
 from tox_irc_bridge.settings import *
 
 
 class SyncBot(Tox):
     def __init__(self):
-        if exists('data'):
-            self.load_from_file('data')
 
-        self.av = AV(self, 10)
         self.connect()
-        self.set_name(BOT_TOXNAME)
-        self.set_status_message("Send me a message with the word 'invite'")
-        print('ID: %s' % self.get_address())
+        self.self_set_name(TOX_NAME)
+        self.self_set_status_message("Send me a message with the word 'invite'")
+        print('ID: %s' % self.self_get_address())
 
         self.readbuffer = ''
         self.tox_group_id = None
@@ -33,18 +29,23 @@ class SyncBot(Tox):
         self.memory = {}
 
         if exists(MEMORY_DB):
-            with open(MEMORY_DB, 'r') as f:
+            with open(MEMORY_DB, 'rb') as f:
                 self.memory = pickle.load(f)
 
     def irc_init(self):
         self.irc = socket.socket()
         self.irc.connect((IRC_HOST, IRC_PORT))
-        self.irc.send('NICK %s\r\n' % NICK)
-        self.irc.send('USER %s %s bla :%s\r\n' % (IDENT, IRC_HOST, REALNAME))
+        self.irc = ssl.wrap_socket(self.irc)
+        if sys.version_info >= (3,0,0):
+            self.irc.send(('NICK %s\r\n' % NICK).encode())
+            self.irc.send(('USER %s %s bla :%s\r\n' % (IDENT, IRC_HOST, REALNAME)).encode())
+        else:
+            self.irc.send(('NICK %s\r\n' % NICK))
+            self.irc.send(('USER %s %s bla :%s\r\n' % (IDENT, IRC_HOST, REALNAME)))
 
     def connect(self):
         print('connecting...')
-        self.bootstrap_from_address(SERVER[0], SERVER[1], SERVER[2])
+        self.bootstrap(SERVER[0], SERVER[1], SERVER[2])
 
     def ensure_exe(self, func, args):
         count = 0
@@ -57,7 +58,7 @@ class SyncBot(Tox):
                 assert count < THRESHOLD
                 count += 1
                 for i in range(10):
-                    self.do()
+                    self.iterate()
                     sleep(0.02)
 
     def loop(self):
@@ -67,15 +68,15 @@ class SyncBot(Tox):
 
         try:
             while True:
-                status = self.isconnected()
+                status = self.self_get_connection_status()
                 if not checked and status:
                     print('Connected to DHT.')
                     checked = True
                     try:
-                        self.bid = self.get_friend_id(GROUP_BOT)
+                        self.bid = self.friend_by_public_key(GROUP_BOT)
                     except:
-                        self.ensure_exe(self.add_friend, (GROUP_BOT, 'Hi'))
-                        self.bid = self.get_friend_id(GROUP_BOT)
+                        self.ensure_exe(self.friend_add, (GROUP_BOT, 'Hi'))
+                        self.bid = self.friend_by_public_key(GROUP_BOT)
 
                 if checked and not status:
                     print('Disconnected from DHT.')
@@ -85,7 +86,7 @@ class SyncBot(Tox):
                 readable, _, _ = select.select([self.irc], [], [], 0.01)
 
                 if readable:
-                    self.readbuffer += self.irc.recv(4096)
+                    self.readbuffer += self.irc.recv(4096).decode('utf-8') if sys.version_info >= (3, 0, 0) else self.irc.recv(4096)
                     lines = self.readbuffer.split('\n')
                     self.readbuffer = lines.pop()
 
@@ -94,12 +95,18 @@ class SyncBot(Tox):
                                 CHANNEL, line, re.S)
                         if rx:
                             print('IRC> %s: %s' % rx.groups())
-                            msg = '[%s]: %s' % rx.groups()
+                            msg = '(%s) %s' % (rx.groups()[0], re.sub(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?','',rx.groups()[1]))
                             content = rx.group(2)
 
+                            if (
+                                rx.groups()[0] in BLOCK_LIST or
+                                content.split("[", 1)[-1].split("]", 1)[0] in BLOCK_LIST
+                            ):
+                                continue
+
                             if content[1:].startswith('ACTION '):
-                                action = '[%s]: %s' % (rx.group(1),
-                                        rx.group(2)[8:-1])
+                                action = '(%s) %s' % (rx.group(1),
+                                        re.sub(r'\x03(?:\d{1,2}(?:,\d{1,2})?)?','',rx.group(2)[8:-1]))
                                 self.ensure_exe(self.group_action_send,
                                         (self.tox_group_id, action))
                             elif self.tox_group_id != None:
@@ -107,37 +114,50 @@ class SyncBot(Tox):
                                         (self.tox_group_id, msg))
 
                             if content.startswith('^'):
-                                self.handle_command(content)
+                                # self.handle_command(content)
+                                pass
 
                         l = line.rstrip().split()
                         if l[0] == 'PING':
                            self.irc_send('PONG %s\r\n' % l[1])
                         if l[1] == '376':
-                           self.irc.send('PRIVMSG NickServ :IDENTIFY %s %s\r\n'
-                                   % (NICK, PWD))
-                           self.irc.send('JOIN %s\r\n' % CHANNEL)
+                            if sys.version_info >= (3,0,0):
+                                self.irc.send(('PRIVMSG NickServ :IDENTIFY %s %s\r\n'
+                                    % (NICK, PWD)).encode())
+                                self.irc.send(('JOIN %s\r\n' % CHANNEL).encode())
+                            else:
+                                self.irc.send(('PRIVMSG NickServ :IDENTIFY %s %s\r\n'
+                                    % (NICK, PWD)))
+                                self.irc.send(('JOIN %s\r\n' % CHANNEL))
 
-                self.do()
+                self.iterate()
+        except OperationFailedError:
+            pass
         except KeyboardInterrupt:
-            self.save_to_file('data')
+            # TODO wait
+            # self.save_to_file('data')
+            pass
 
     def irc_send(self, msg):
         success = False
         while not success:
             try:
-                self.irc.send(msg)
+                if sys.version_info >= (3,0,0):
+                    self.irc.send(msg.encode())
+                else:
+                    self.irc.send(msg)
                 success = True
                 break
             except socket.error:
                 self.irc_init()
                 sleep(1)
 
-    def on_connection_status(self, friendId, status):
+    def on_friend_connection_status(self, friendId, status):
         if not self.request and not self.joined \
                 and friendId == self.bid and status:
             print('Groupbot online, trying to join group chat.')
             self.request = True
-            self.ensure_exe(self.send_message, (self.bid, 'invite'))
+            self.ensure_exe(self.friend_send_message, (self.bid, Tox.MESSAGE_TYPE_NORMAL, 'invite'))
 
     def on_group_invite(self, friendid, type, data):
         if not self.joined:
@@ -146,14 +166,18 @@ class SyncBot(Tox):
             print('Joined groupchat.')
 
     def on_group_message(self, groupnumber, friendgroupnumber, message):
+        if message.startswith("@@"):
+            return
         name = self.group_peername(groupnumber, friendgroupnumber)
         if len(name) and name != NAME:
             print('TOX> %s: %s' % (name, message))
             if message.startswith('>'):
                 message = '\x0309%s\x03' % message
 
-            self.irc_send('PRIVMSG %s :[%s]: %s\r\n' %
-                          (CHANNEL, name, message))
+            for msg in message.split('\n'):
+                if not msg.strip(): continue
+                self.irc_send('PRIVMSG %s :(%s) %s\r\n' % (CHANNEL, name, msg))
+
             if message.startswith('^'):
                 self.handle_command(message)
 
@@ -163,12 +187,12 @@ class SyncBot(Tox):
             print('TOX> %s: %s' % (name, action))
             if action.startswith('>'):
                 action = '\x0309%s\x03' % action
-            self.irc_send('PRIVMSG %s :\x01ACTION [%s]: %s\x01\r\n' %
+            self.irc_send('PRIVMSG %s :\x01ACTION (%s) %s\x01\r\n' %
                     (CHANNEL, name, action))
 
     def on_friend_request(self, pk, message):
         print('Friend request from %s: %s' % (pk, message))
-        self.add_friend_norequest(pk)
+        self.friend_add_norequest(pk)
         print('Accepted.')
 
     def on_friend_message(self, friendid, message):
@@ -179,8 +203,12 @@ class SyncBot(Tox):
                 return
             else:
                 message = 'Waiting for GroupBot, please try again in 1 min.'
+        elif message == "Group doesn't exist.":
+            message = 'group text'
 
-        self.ensure_exe(self.send_message, (friendid, message))
+        self.ensure_exe(self.friend_send_message, (friendid, Tox.MESSAGE_TYPE_NORMAL, message))
+        if message == "Group doesn't exist.":
+            self.ensure_exe(self.friend_send_message, (friendid, Tox.MESSAGE_TYPE_NORMAL, 'invite'))
 
     def send_both(self, content):
         self.ensure_exe(self.group_message_send, (self.tox_group_id, content))
@@ -189,16 +217,23 @@ class SyncBot(Tox):
     def handle_command(self, cmd):
         cmd = cmd[1:]
         if cmd in ['syncbot', 'echobot']:
-            self.send_both(self.get_address())
+#            self.send_both(self.get_address())
+            pass
+        elif cmd.startswith('say ') and len(cmd.split())>=1:
+            args = cmd[len('say '):]
+            self.send_both(args)
         elif cmd == 'resync':
-            sys.exit(0)
-        elif cmd.startswith('remember '):
-            args = cmd[9:].split(' ')
-            subject = args[0]
-            desc = ' '.join(args[1:])
-            self.memory[subject] = desc
-            with open(MEMORY_DB, 'w') as f:
-                pickle.dump(self.memory, f)
-            self.send_both('Remembering ^%s: %s' % (subject, desc))
-        elif self.memory.has_key(cmd):
-            self.send_both(self.memory[cmd])
+            pass
+            # sys.exit(0)
+        elif cmd.startswith("block "):
+            if len(BLOCK_LIST) <= 10:
+                BLOCK_LIST.add(cmd.split(" ")[-1])
+            else:
+                self.send_both("block list too long.")
+        elif cmd.startswith("unblock "):
+            try:
+                BLOCK_LIST.remove(cmd.split(" ")[-1])
+            except KeyError as err:
+                self.send_both("the list have no {}.".format(err))
+        elif cmd.startswith("blist"):
+            self.send_both("BLOCK LIST: {}".format(" | ".join(map(str, BLOCK_LIST))))

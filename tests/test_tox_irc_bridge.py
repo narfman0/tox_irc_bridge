@@ -12,7 +12,6 @@ Tests for `tox_irc_bridge` module.
 import sys
 import unittest
 
-from tox_irc_bridge.av import AV
 from tox_irc_bridge.sync_bot import SyncBot
 
 
