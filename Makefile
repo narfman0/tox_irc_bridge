@@ -51,19 +51,16 @@ lint: ## check style with flake8
 	flake8 tox_irc_bridge tests
 
 test: ## run tests quickly with the default Python
-
-		python setup.py test
+	python setup.py test
 
 test-all: ## run tests on every Python version with tox
 	tox
 
 coverage: ## check code coverage quickly with the default Python
-
-		coverage run --source tox_irc_bridge setup.py test
-
-		coverage report -m
-		coverage html
-		$(BROWSER) htmlcov/index.html
+	coverage run --source tox_irc_bridge setup.py test
+	coverage report -m
+	coverage html
+	$(BROWSER) htmlcov/index.html
 
 release: clean ## package and upload a release
 	python setup.py sdist upload

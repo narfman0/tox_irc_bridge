@@ -16,7 +16,7 @@ from tox_irc_bridge.av import AV
 from tox_irc_bridge.sync_bot import SyncBot
 
 
-class TestTox_irc_bridge(unittest.TestCase):
+class TestToxIRCBridge(unittest.TestCase):
     def setUp(self):
         pass
 

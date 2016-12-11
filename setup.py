@@ -12,8 +12,6 @@ requirements = [
 ]
 
 test_requirements =  requirements + [
-    'flake8',
-    'tox',
     'coverage',
 ]
 
@@ -28,8 +26,7 @@ setup(
     packages=[
         'tox_irc_bridge',
     ],
-    package_dir={'tox_irc_bridge':
-                 'tox_irc_bridge'},
+    package_dir={'tox_irc_bridge': 'tox_irc_bridge'},
     include_package_data=True,
     install_requires=requirements,
     license="GNU General Public License v3",
@@ -46,5 +43,5 @@ setup(
         'Programming Language :: Python :: 3.5',
     ],
     test_suite='tests',
-    tests_require=test_requirements
+    tests_require=test_requirements,
 )
